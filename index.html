@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Simulacao de Checkout</title>
+	<style>
+		:root {
+			--bg: #f2f5f7;
+			--panel: #ffffff;
+			--border: #d4dde3;
+			--text: #1c2a33;
+			--muted: #5b6d78;
+			--accent: #1f6feb;
+			--ok: #0a7a43;
+			--warn: #b45309;
+		}
+
+		body {
+			margin: 0;
+			font-family: Arial, sans-serif;
+			background: radial-gradient(circle at 20% 20%, #ffffff 0, var(--bg) 45%, #e8eef2 100%);
+			color: var(--text);
+			display: grid;
+			place-items: center;
+			min-height: 100vh;
+		}
+
+		.box {
+			width: min(860px, 94vw);
+			background: var(--panel);
+			border: 1px solid var(--border);
+			border-radius: 14px;
+			padding: 22px;
+			box-shadow: 0 10px 24px rgba(16, 24, 40, 0.08);
+		}
+
+		h1 {
+			margin-top: 0;
+			margin-bottom: 8px;
+		}
+
+		p {
+			margin-top: 0;
+			color: var(--muted);
+		}
+
+		button {
+			border: 0;
+			border-radius: 10px;
+			padding: 11px 18px;
+			background: var(--accent);
+			color: #fff;
+			cursor: pointer;
+			font-size: 14px;
+			font-weight: 700;
+		}
+
+		button:disabled {
+			opacity: 0.6;
+			cursor: not-allowed;
+		}
+
+		.status {
+			margin-top: 14px;
+			font-size: 14px;
+			font-weight: 600;
+		}
+
+		.summary {
+			display: grid;
+			grid-template-columns: repeat(4, minmax(0, 1fr));
+			gap: 10px;
+			margin-top: 16px;
+		}
+
+		.kpi {
+			background: #f8fbff;
+			border: 1px solid #d9e9ff;
+			border-radius: 10px;
+			padding: 10px;
+		}
+
+		.kpi .label {
+			font-size: 12px;
+			color: var(--muted);
+		}
+
+		.kpi .value {
+			margin-top: 4px;
+			font-size: 18px;
+			font-weight: 700;
+		}
+
+		.clients {
+			margin-top: 16px;
+			display: grid;
+			gap: 12px;
+		}
+
+		.thread-card {
+			border: 1px solid var(--border);
+			border-radius: 12px;
+			padding: 14px;
+			background: #fff;
+		}
+
+		.thread-title {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			margin: 0 0 10px;
+		}
+
+		.thread-time {
+			font-size: 12px;
+			color: var(--muted);
+		}
+
+		.flow {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			flex-wrap: wrap;
+		}
+
+		.stage {
+			min-width: 132px;
+			padding: 10px 12px;
+			border: 2px solid var(--line-color, #1f6feb);
+			border-radius: 14px;
+			font-weight: 700;
+			display: flex;
+			justify-content: center;
+			align-items: center;
+			text-align: center;
+			color: var(--line-color, #1f6feb);
+			background: #f9fcff;
+		}
+
+		.connector {
+			display: grid;
+			justify-items: center;
+			min-width: 86px;
+		}
+
+		.connector-time {
+			font-size: 12px;
+			font-weight: 700;
+			color: var(--line-color, #1f6feb);
+		}
+
+		.connector-line {
+			position: relative;
+			width: 76px;
+			height: 2px;
+			margin-top: 3px;
+			background: var(--line-color, #1f6feb);
+		}
+
+		.connector-line::after {
+			content: '';
+			position: absolute;
+			right: -2px;
+			top: -4px;
+			border-left: 10px solid var(--line-color, #1f6feb);
+			border-top: 5px solid transparent;
+			border-bottom: 5px solid transparent;
+		}
+
+		.stage.final {
+			min-width: 170px;
+			line-height: 1.2;
+		}
+
+		.logs {
+			margin-top: 14px;
+			background: #f8f8f8;
+			border: 1px solid #ddd;
+			border-radius: 8px;
+			padding: 12px;
+			white-space: pre-wrap;
+			min-height: 120px;
+			max-height: 210px;
+			overflow: auto;
+		}
+
+		.tag-ok {
+			color: var(--ok);
+		}
+
+		.tag-warn {
+			color: var(--warn);
+		}
+
+		@media (max-width: 740px) {
+			.summary {
+				grid-template-columns: repeat(2, minmax(0, 1fr));
+			}
+
+			.flow {
+				gap: 6px;
+			}
+
+			.connector {
+				min-width: 64px;
+			}
+
+			.connector-line {
+				width: 54px;
+			}
+		}
+	</style>
+</head>
+<body>
+	<main class="box">
+		<h1>Simulacao de Checkout</h1>
+		<p>Fluxo: iniciar simulacao -> API processa -> etapas e resultado visual.</p>
+		<button id="startBtn">Start simulation</button>
+		<div id="status" class="status">Aguardando inicio.</div>
+
+		<section class="summary">
+			<div class="kpi">
+				<div class="label">Estoque inicial</div>
+				<div id="estoqueInicial" class="value">-</div>
+			</div>
+			<div class="kpi">
+				<div class="label">Estoque final</div>
+				<div id="estoqueFinal" class="value">-</div>
+			</div>
+			<div class="kpi">
+				<div class="label">Race condition</div>
+				<div id="race" class="value">-</div>
+			</div>
+			<div class="kpi">
+				<div class="label">Tempo total</div>
+				<div id="tempoTotal" class="value">-</div>
+			</div>
+		</section>
+
+		<section id="clients" class="clients"></section>
+		<div id="logs" class="logs"></div>
+	</main>
+
+	<script>
+		const startBtn = document.getElementById('startBtn');
+		const statusEl = document.getElementById('status');
+		const estoqueInicialEl = document.getElementById('estoqueInicial');
+		const estoqueFinalEl = document.getElementById('estoqueFinal');
+		const raceEl = document.getElementById('race');
+		const tempoTotalEl = document.getElementById('tempoTotal');
+		const clientsEl = document.getElementById('clients');
+		const logsEl = document.getElementById('logs');
+
+		function formatSeconds(value) {
+			if (typeof value !== 'number') {
+				return '-';
+			}
+
+			return `${value.toFixed(3)}s`;
+		}
+
+		function toMs(deltaSeconds) {
+			if (typeof deltaSeconds !== 'number') {
+				return '-';
+			}
+
+			return `${(deltaSeconds * 1000).toFixed(1)}ms`;
+		}
+
+		function renderClients(clientes) {
+			clientsEl.innerHTML = '';
+
+			const ids = Object.keys(clientes || {}).sort((a, b) => Number(a) - Number(b));
+			for (const id of ids) {
+				const cliente = clientes[id];
+				const visual = cliente.visual || {};
+				const t1 = visual.fez_pedido_s;
+				const t2 = visual.processando_s;
+				const t3 = visual.final_s;
+				const delta1 = (typeof t1 === 'number' && typeof t2 === 'number') ? (t2 - t1) : null;
+				const delta2 = (typeof t2 === 'number' && typeof t3 === 'number') ? (t3 - t2) : null;
+				const color = Number(id) % 2 === 0 ? '#dc2626' : '#1f6feb';
+				const estadoFinal = visual.estado_final || 'Completo';
+
+				const card = document.createElement('article');
+				card.className = 'thread-card';
+				card.style.setProperty('--line-color', color);
+				card.innerHTML = `
+					<h3 class="thread-title">
+						<span>${cliente.nome || `Cliente ${id}`}</span>
+						<span class="thread-time">Tempo de processamento: ${formatSeconds(cliente.tempo_processamento_s)}</span>
+					</h3>
+					<div class="flow">
+						<div class="stage">Fez pedido</div>
+						<div class="connector">
+							<div class="connector-time">${toMs(delta1)}</div>
+							<div class="connector-line"></div>
+						</div>
+						<div class="stage">Processando</div>
+						<div class="connector">
+							<div class="connector-time">${toMs(delta2)}</div>
+							<div class="connector-line"></div>
+						</div>
+						<div class="stage final">
+							<div>${estadoFinal}</div>
+							<div>Saldo ${cliente.saldo_apos_cliente ?? '-'}</div>
+						</div>
+					</div>
+				`;
+
+				clientsEl.appendChild(card);
+			}
+		}
+
+		async function startSimulation() {
+			startBtn.disabled = true;
+			statusEl.textContent = 'Processando simulacao via API...';
+			clientsEl.innerHTML = '';
+			logsEl.textContent = '';
+			estoqueInicialEl.textContent = '-';
+			estoqueFinalEl.textContent = '-';
+			raceEl.textContent = '-';
+			tempoTotalEl.textContent = '-';
+
+			try {
+				const response = await fetch('http://127.0.0.1:8000/api/simular', {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json'
+					},
+					body: JSON.stringify({ iniciar: true })
+				});
+
+				if (!response.ok) {
+					throw new Error(`Falha HTTP ${response.status}`);
+				}
+
+				const data = await response.json();
+
+				estoqueInicialEl.textContent = String(data.estoque_inicial);
+				estoqueFinalEl.textContent = String(data.estoque_final);
+				tempoTotalEl.textContent = formatSeconds(data.tempo_total_s);
+				raceEl.textContent = data.race_condition ? 'SIM' : 'NAO';
+				raceEl.className = `value ${data.race_condition ? 'tag-warn' : 'tag-ok'}`;
+
+				renderClients(data.clientes || {});
+				logsEl.textContent = (data.logs || []).join('\n');
+				statusEl.textContent = 'Simulacao concluida.';
+			} catch (error) {
+				statusEl.textContent = 'Erro ao chamar API.';
+				logsEl.textContent = String(error);
+			} finally {
+				startBtn.disabled = false;
+			}
+		}
+
+		startBtn.addEventListener('click', startSimulation);
+	</script>
+</body>
+</html>
