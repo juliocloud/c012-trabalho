@@ -39,6 +39,18 @@ def normalizar_quantidade_clientes(valor):
     return quantidade
 
 
+def normalizar_estoque_inicial(valor):
+    try:
+        estoque = int(valor)
+    except (TypeError, ValueError):
+        raise ValueError("estoque_inicial deve ser um numero inteiro")
+
+    if estoque < 0:
+        raise ValueError("estoque_inicial nao pode ser negativo")
+
+    return estoque
+
+
 def criar_estado_cliente(cliente_id):
     return {
         "nome": f"Cliente {cliente_id}",
@@ -52,13 +64,12 @@ def criar_estado_cliente(cliente_id):
             "estado_final": None,
         },
     }
-
 def processar_checkout(cliente_id, produto, inicio_simulacao=None, logs=None, clientes=None):
     cliente_key = str(cliente_id)
     visual_ativo = inicio_simulacao is not None and logs is not None and clientes is not None
 
     def tempo_atual():
-        return round(time.perf_counter() - inicio_simulacao, 3)
+        return time.perf_counter() - inicio_simulacao
 
     def registrar(msg, etapa=None):
         if visual_ativo:
@@ -84,12 +95,18 @@ def processar_checkout(cliente_id, produto, inicio_simulacao=None, logs=None, cl
 
     if produto.quantidade_estoque > 0:
         r = tempo_de_checkout()
+        espera_ate_processamento = r * random.uniform(0.25, 0.75)
+        tempo_processando = r - espera_ate_processamento
         if visual_ativo:
-            clientes[cliente_key]["tempo_processamento_s"] = round(r, 3)
+            clientes[cliente_key]["tempo_processamento_s"] = r
+
+        time.sleep(espera_ate_processamento)
+
+        if visual_ativo:
             clientes[cliente_key]["visual"]["processando_s"] = tempo_atual()
 
         registrar("processando pagamento", "processando pagamento")
-        time.sleep(r)
+        time.sleep(tempo_processando)
 
         registrar("processado", "processado")
         produto.quantidade_estoque -= 1
@@ -111,9 +128,13 @@ def processar_checkout(cliente_id, produto, inicio_simulacao=None, logs=None, cl
             clientes[cliente_key]["visual"]["estado_final"] = "Falhou"
             clientes[cliente_key]["saldo_apos_cliente"] = produto.quantidade_estoque
 
-def simular_sistema(quantidade_clientes=QUANTIDADE_CLIENTES_PADRAO):
+def simular_sistema(
+    quantidade_clientes=QUANTIDADE_CLIENTES_PADRAO,
+    estoque_inicial=ESTOQUE_INICIAL_PADRAO,
+):
     quantidade_clientes = normalizar_quantidade_clientes(quantidade_clientes)
-    notebook = Produto(nome="Notebook Gamer", estoque_inicial=ESTOQUE_INICIAL_PADRAO)
+    estoque_inicial = normalizar_estoque_inicial(estoque_inicial)
+    notebook = Produto(nome="Notebook Gamer", estoque_inicial=estoque_inicial)
     threads = [
         threading.Thread(target=processar_checkout, args=(cliente_id, notebook))
         for cliente_id in range(1, quantidade_clientes + 1)
@@ -132,20 +153,19 @@ def simular_sistema(quantidade_clientes=QUANTIDADE_CLIENTES_PADRAO):
         print("ERRO: O estoque está negativo! A race condition foi bem-sucedida.")
 
 
-def simular_sistema_com_resultado(quantidade_clientes=QUANTIDADE_CLIENTES_PADRAO):
+def simular_sistema_com_resultado(
+    quantidade_clientes=QUANTIDADE_CLIENTES_PADRAO,
+    estoque_inicial=ESTOQUE_INICIAL_PADRAO,
+):
     quantidade_clientes = normalizar_quantidade_clientes(quantidade_clientes)
-    notebook = Produto(nome="Notebook Gamer", estoque_inicial=ESTOQUE_INICIAL_PADRAO)
+    estoque_inicial = normalizar_estoque_inicial(estoque_inicial)
+    notebook = Produto(nome="Notebook Gamer", estoque_inicial=estoque_inicial)
     logs = []
-
     inicio_simulacao = time.perf_counter()
-
     clientes = {
         str(cliente_id): criar_estado_cliente(cliente_id)
         for cliente_id in range(1, quantidade_clientes + 1)
     }
-
-    logs.append(f"[0.000s] Estoque inicial: {notebook.quantidade_estoque}")
-
     threads = [
         threading.Thread(
             target=processar_checkout,
@@ -154,13 +174,15 @@ def simular_sistema_com_resultado(quantidade_clientes=QUANTIDADE_CLIENTES_PADRAO
         for cliente_id in range(1, quantidade_clientes + 1)
     ]
 
+    logs.append(f"[0.000s] Estoque inicial: {notebook.quantidade_estoque}")
+
     for thread in threads:
         thread.start()
 
     for thread in threads:
         thread.join()
 
-    tempo_total = round(time.perf_counter() - inicio_simulacao, 3)
+    tempo_total = time.perf_counter() - inicio_simulacao
     logs.append(f"[{tempo_total:.3f}s] Estoque final: {notebook.quantidade_estoque}")
     erro_race_condition = notebook.quantidade_estoque < 0
     if erro_race_condition:
@@ -168,7 +190,7 @@ def simular_sistema_com_resultado(quantidade_clientes=QUANTIDADE_CLIENTES_PADRAO
 
     return {
         "quantidade_clientes": quantidade_clientes,
-        "estoque_inicial": ESTOQUE_INICIAL_PADRAO,
+        "estoque_inicial": estoque_inicial,
         "estoque_final": notebook.quantidade_estoque,
         "race_condition": erro_race_condition,
         "tempo_total_s": tempo_total,
@@ -220,11 +242,17 @@ class SimulacaoAPIHandler(BaseHTTPRequestHandler):
             quantidade_clientes = normalizar_quantidade_clientes(
                 payload.get("quantidade_clientes", QUANTIDADE_CLIENTES_PADRAO)
             )
+            estoque_inicial = normalizar_estoque_inicial(
+                payload.get("estoque_inicial", ESTOQUE_INICIAL_PADRAO)
+            )
         except ValueError as exc:
             self._enviar_json(400, {"erro": str(exc)})
             return
 
-        resultado = simular_sistema_com_resultado(quantidade_clientes=quantidade_clientes)
+        resultado = simular_sistema_com_resultado(
+            quantidade_clientes=quantidade_clientes,
+            estoque_inicial=estoque_inicial,
+        )
         self._enviar_json(200, resultado)
 
 
@@ -232,7 +260,11 @@ def iniciar_api(host="127.0.0.1", porta=8000):
     servidor = HTTPServer((host, porta), SimulacaoAPIHandler)
     print(f"API iniciada em http://{host}:{porta}")
     print("Endpoint: POST /api/simular")
-    print(f"Payload opcional: {{\"quantidade_clientes\": {QUANTIDADE_CLIENTES_PADRAO}}}")
+    print(
+        "Payload opcional: "
+        f"{{\"quantidade_clientes\": {QUANTIDADE_CLIENTES_PADRAO}, "
+        f"\"estoque_inicial\": {ESTOQUE_INICIAL_PADRAO}}}"
+    )
     servidor.serve_forever()
 
 if __name__ == "__main__":

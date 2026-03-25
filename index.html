@@ -301,6 +301,10 @@
 				<span>Quantidade de clientes</span>
 				<input id="clientCountInput" type="number" min="1" step="1" value="2">
 			</label>
+			<label class="field" for="stockInput">
+				<span>Estoque inicial</span>
+				<input id="stockInput" type="number" min="0" step="1" value="1">
+			</label>
 			<button id="startBtn">Start simulation</button>
 		</div>
 		<div class="controls">
@@ -338,6 +342,7 @@
 	<script>
 		const startBtn = document.getElementById('startBtn');
 		const clientCountInput = document.getElementById('clientCountInput');
+		const stockInput = document.getElementById('stockInput');
 		const prevStepBtn = document.getElementById('prevStepBtn');
 		const nextStepBtn = document.getElementById('nextStepBtn');
 		const playPauseBtn = document.getElementById('playPauseBtn');
@@ -362,6 +367,10 @@
 				return '-';
 			}
 
+			if (Math.abs(value) < 0.01) {
+				return `${value.toFixed(6)}s`;
+			}
+
 			return `${value.toFixed(3)}s`;
 		}
 
@@ -370,7 +379,12 @@
 				return '-';
 			}
 
-			return `${(deltaSeconds * 1000).toFixed(1)}ms`;
+			const deltaMs = deltaSeconds * 1000;
+			if (Math.abs(deltaMs) < 1) {
+				return `${deltaMs.toFixed(4)}ms`;
+			}
+
+			return `${deltaMs.toFixed(1)}ms`;
 		}
 
 		function getRequestedClientCount() {
@@ -385,13 +399,25 @@
 			return parsed;
 		}
 
+		function getRequestedStock() {
+			const parsed = Number.parseInt(stockInput.value, 10);
+
+			if (!Number.isInteger(parsed) || parsed < 0) {
+				stockInput.value = '1';
+				return 1;
+			}
+
+			stockInput.value = String(parsed);
+			return parsed;
+		}
+
 		function getClientColor(clientId) {
 			const index = Number(clientId) - 1;
 			return clientColors[((index % clientColors.length) + clientColors.length) % clientColors.length];
 		}
 
 		function stageFromEventName(etapa) {
-			if (etapa === 'pagou') {
+			if (etapa === 'pagou' || etapa.includes('aguardando API') || etapa.includes('verificando estoque')) {
 				return 1;
 			}
 
@@ -399,11 +425,39 @@
 				return 3;
 			}
 
-			if (etapa.includes('processando') || etapa.includes('verificando') || etapa.includes('aguardando API') || etapa.includes('processado')) {
+			if (etapa.includes('processando') || etapa.includes('processado')) {
 				return 2;
 			}
 
 			return 0;
+		}
+
+		function getMiddleStageLabel(lastEvent) {
+			if (typeof lastEvent !== 'string' || lastEvent === '-') {
+				return 'Aguardando';
+			}
+
+			if (lastEvent === 'pagou') {
+				return 'Aguardando API';
+			}
+
+			if (lastEvent.includes('aguardando API')) {
+				return 'Aguardando API';
+			}
+
+			if (lastEvent.includes('verificando estoque')) {
+				return 'Verificando estoque';
+			}
+
+			if (lastEvent.includes('processando pagamento')) {
+				return 'Processando';
+			}
+
+			if (lastEvent.includes('processado')) {
+				return 'Processado';
+			}
+
+			return 'Processando';
 		}
 
 		function isSuccessEvent(etapa) {
@@ -549,6 +603,7 @@
 
 				const saldoLabel = state.stage >= 3 ? (cliente.saldo_apos_cliente ?? '-') : '-';
 				const finalLabel = state.stage >= 3 ? estadoFinal : 'Aguardando';
+				const middleStageLabel = getMiddleStageLabel(state.lastEvent);
 				const tempoProcessamento = state.stage >= 3 ? formatSeconds(cliente.tempo_processamento_s) : '-';
 				const delta1Label = state.stage >= 2 ? toMs(delta1) : '-';
 				const delta2Label = state.stage >= 3 ? toMs(delta2) : '-';
@@ -567,7 +622,7 @@
 							<div class="connector-time ${connector1Class}">${delta1Label}</div>
 							<div class="connector-line ${connector1Class}"></div>
 						</div>
-						<div class="stage ${stage2Class}">Processando</div>
+						<div class="stage ${stage2Class}">${middleStageLabel}</div>
 						<div class="connector">
 							<div class="connector-time ${connector2Class}">${delta2Label}</div>
 							<div class="connector-line ${connector2Class}"></div>
@@ -637,9 +692,11 @@
 
 		async function startSimulation() {
 			const quantidadeClientes = getRequestedClientCount();
+			const estoqueInicial = getRequestedStock();
 			startBtn.disabled = true;
 			clientCountInput.disabled = true;
-			statusEl.textContent = `Processando simulacao via API para ${quantidadeClientes} cliente(s)...`;
+			stockInput.disabled = true;
+			statusEl.textContent = `Processando simulacao via API para ${quantidadeClientes} cliente(s) com estoque ${estoqueInicial}...`;
 			clientsEl.innerHTML = '';
 			logsEl.textContent = '';
 			stepInfoEl.textContent = 'Passo: -';
@@ -663,7 +720,8 @@
 					},
 					body: JSON.stringify({
 						iniciar: true,
-						quantidade_clientes: quantidadeClientes
+						quantidade_clientes: quantidadeClientes,
+						estoque_inicial: estoqueInicial
 					})
 				});
 
@@ -677,7 +735,7 @@
 				timeline = buildTimeline(data.clientes || {});
 				currentStepIndex = -1;
 				updateReplayView();
-				statusEl.textContent = `Simulacao concluida para ${data.quantidade_clientes || quantidadeClientes} cliente(s). Use os controles para slow motion.`;
+				statusEl.textContent = `Simulacao concluida para ${data.quantidade_clientes || quantidadeClientes} cliente(s) com estoque ${data.estoque_inicial ?? estoqueInicial}. Use os controles para slow motion.`;
 			} catch (error) {
 				statusEl.textContent = 'Erro ao chamar API.';
 				logsEl.textContent = String(error);
@@ -685,6 +743,7 @@
 			} finally {
 				startBtn.disabled = false;
 				clientCountInput.disabled = false;
+				stockInput.disabled = false;
 			}
 		}
 
