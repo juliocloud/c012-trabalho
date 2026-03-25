@@ -345,6 +345,14 @@
 			return 0;
 		}
 
+		function isSuccessEvent(etapa) {
+			return typeof etapa === 'string' && etapa.includes('compra concluida');
+		}
+
+		function isFinalEvent(etapa) {
+			return typeof etapa === 'string' && (etapa.includes('compra concluida') || etapa.includes('falha'));
+		}
+
 		function buildTimeline(clientes) {
 			const events = [];
 			const ids = Object.keys(clientes || {});
@@ -396,6 +404,66 @@
 			return state;
 		}
 
+		function buildSummaryAtStep(data, events, stepIndex) {
+			const summary = {
+				estoqueInicial: '-',
+				estoqueFinal: '-',
+				raceText: '-',
+				raceClassName: 'value',
+				tempoTotal: '-',
+			};
+
+			if (!data || stepIndex < 0 || !events.length) {
+				return summary;
+			}
+
+			let estoqueAtual = typeof data.estoque_inicial === 'number' ? data.estoque_inicial : null;
+			let clientesFinalizados = 0;
+
+			summary.estoqueInicial = estoqueAtual === null ? '-' : String(estoqueAtual);
+
+			for (let i = 0; i <= stepIndex; i += 1) {
+				const event = events[i];
+				if (!event) {
+					continue;
+				}
+
+				if (isSuccessEvent(event.etapa) && typeof estoqueAtual === 'number') {
+					estoqueAtual -= 1;
+				}
+
+				if (isFinalEvent(event.etapa)) {
+					clientesFinalizados += 1;
+				}
+
+				summary.tempoTotal = formatSeconds(event.tempo_s);
+			}
+
+			summary.estoqueFinal = estoqueAtual === null ? '-' : String(estoqueAtual);
+
+			if (typeof estoqueAtual === 'number' && estoqueAtual < 0) {
+				summary.raceText = 'SIM';
+				summary.raceClassName = 'value tag-warn';
+				return summary;
+			}
+
+			const totalClientes = Object.keys(data.clientes || {}).length;
+			if (totalClientes > 0 && clientesFinalizados >= totalClientes) {
+				summary.raceText = 'NAO';
+				summary.raceClassName = 'value tag-ok';
+			}
+
+			return summary;
+		}
+
+		function updateSummaryView(summary) {
+			estoqueInicialEl.textContent = summary.estoqueInicial;
+			estoqueFinalEl.textContent = summary.estoqueFinal;
+			raceEl.textContent = summary.raceText;
+			raceEl.className = summary.raceClassName;
+			tempoTotalEl.textContent = summary.tempoTotal;
+		}
+
 		function renderClients(clientes, stateByClient = {}) {
 			clientsEl.innerHTML = '';
 
@@ -420,6 +488,9 @@
 
 				const saldoLabel = state.stage >= 3 ? (cliente.saldo_apos_cliente ?? '-') : '-';
 				const finalLabel = state.stage >= 3 ? estadoFinal : 'Aguardando';
+				const tempoProcessamento = state.stage >= 3 ? formatSeconds(cliente.tempo_processamento_s) : '-';
+				const delta1Label = state.stage >= 2 ? toMs(delta1) : '-';
+				const delta2Label = state.stage >= 3 ? toMs(delta2) : '-';
 
 				const card = document.createElement('article');
 				card.className = 'thread-card';
@@ -427,17 +498,17 @@
 				card.innerHTML = `
 					<h3 class="thread-title">
 						<span>${cliente.nome || `Cliente ${id}`}</span>
-						<span class="thread-time">Tempo de processamento: ${formatSeconds(cliente.tempo_processamento_s)} | Ultimo evento: ${state.lastEvent}</span>
+						<span class="thread-time">Tempo de processamento: ${tempoProcessamento} | Ultimo evento: ${state.lastEvent}</span>
 					</h3>
 					<div class="flow">
 						<div class="stage ${stage1Class}">Fez pedido</div>
 						<div class="connector">
-							<div class="connector-time ${connector1Class}">${toMs(delta1)}</div>
+							<div class="connector-time ${connector1Class}">${delta1Label}</div>
 							<div class="connector-line ${connector1Class}"></div>
 						</div>
 						<div class="stage ${stage2Class}">Processando</div>
 						<div class="connector">
-							<div class="connector-time ${connector2Class}">${toMs(delta2)}</div>
+							<div class="connector-time ${connector2Class}">${delta2Label}</div>
 							<div class="connector-line ${connector2Class}"></div>
 						</div>
 						<div class="stage final ${stage3Class}">
@@ -465,6 +536,8 @@
 			}
 
 			const state = buildStateAtStep(lastData.clientes || {}, timeline, currentStepIndex);
+			const summary = buildSummaryAtStep(lastData, timeline, currentStepIndex);
+			updateSummaryView(summary);
 			renderClients(lastData.clientes || {}, state);
 
 			if (currentStepIndex < 0) {
@@ -511,10 +584,13 @@
 			timeline = [];
 			currentStepIndex = -1;
 			lastData = null;
-			estoqueInicialEl.textContent = '-';
-			estoqueFinalEl.textContent = '-';
-			raceEl.textContent = '-';
-			tempoTotalEl.textContent = '-';
+			updateSummaryView({
+				estoqueInicial: '-',
+				estoqueFinal: '-',
+				raceText: '-',
+				raceClassName: 'value',
+				tempoTotal: '-',
+			});
 
 			try {
 				const response = await fetch('http://127.0.0.1:8000/api/simular', {
@@ -530,12 +606,6 @@
 				}
 
 				const data = await response.json();
-
-				estoqueInicialEl.textContent = String(data.estoque_inicial);
-				estoqueFinalEl.textContent = String(data.estoque_final);
-				tempoTotalEl.textContent = formatSeconds(data.tempo_total_s);
-				raceEl.textContent = data.race_condition ? 'SIM' : 'NAO';
-				raceEl.className = `value ${data.race_condition ? 'tag-warn' : 'tag-ok'}`;
 
 				lastData = data;
 				timeline = buildTimeline(data.clientes || {});
@@ -564,6 +634,7 @@
 			stopAutoplay();
 			currentStepIndex = -1;
 			updateReplayView();
+			statusEl.textContent = 'Replay resetado. Use Next step para avancar novamente.';
 		});
 		playPauseBtn.addEventListener('click', () => {
 			if (!timeline.length) {
